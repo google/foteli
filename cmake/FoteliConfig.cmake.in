@@ -1,0 +1,10 @@
+@PACKAGE_INIT@
+
+get_property(languages GLOBAL PROPERTY ENABLED_LANGUAGES)
+if ("CXX" IN_LIST languages)
+  include("${CMAKE_CURRENT_LIST_DIR}/FoteliTargets.cmake")
+else ()
+  message(SEND_ERROR "C++ language support must be enabled for Foteli")
+endif ()
+
+check_required_components(Foteli)
