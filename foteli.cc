@@ -17,7 +17,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <limits>
 #include <memory>
 
 struct FoteliParams {
@@ -91,6 +90,7 @@ struct OwnedImage {
   const float* operator[](const int y) const { return image[y]; }
 };
 
+#pragma omp declare simd
 float PQToLinear(const float pq) {
   static constexpr float kPQM1 = 2610.f / 16384;
   static constexpr float kPQM2 = 128 * 2523.f / 4096;
@@ -104,6 +104,7 @@ float PQToLinear(const float pq) {
                             1.f / kPQM1);
 }
 
+#pragma omp declare simd
 float LinearToSRGB(const float linear) {
   if (linear <= 0.04045f / 12.92f) {
     return 12.92f * linear;
@@ -112,6 +113,7 @@ float LinearToSRGB(const float linear) {
   }
 }
 
+#pragma omp declare simd
 float ComputeLuminance(const float r, const float g, const float b) {
   return std::max(1e-12f, 0.2627f * r + 0.6780f * g + 0.0593f * b);
 }
@@ -126,23 +128,23 @@ OwnedImage DownsampledLuminances(const Image<kReadOnly>& red,
   const int downsampled_height = DivCeil(height, kDownsampling);
   OwnedImage result(downsampled_width, downsampled_height);
 
+#pragma omp parallel for
   for (int y = 0; y < downsampled_height; ++y) {
     for (int x = 0; x < downsampled_width; ++x) {
-      result[y][x] = .5f * kDefaultIntensityTarget;
+      float max_luminance = .5f * kDefaultIntensityTarget;
       for (int ky = 0; ky < kDownsampling; ++ky) {
         if (y * kDownsampling + ky >= height) break;
-        const float* const r = red[y * kDownsampling + ky];
-        const float* const g = green[y * kDownsampling + ky];
-        const float* const b = blue[y * kDownsampling + ky];
-        for (int kx = 0; kx < kDownsampling; ++kx) {
-          if (x * kDownsampling + kx >= width) break;
-          const float luminance = ComputeLuminance(r[x * kDownsampling + kx],
-                                                   g[x * kDownsampling + kx],
-                                                   b[x * kDownsampling + kx]);
-          if (luminance > result[y][x]) result[y][x] = luminance;
+        const float* r = red[y * kDownsampling + ky] + x * kDownsampling;
+        const float* g = green[y * kDownsampling + ky] + x * kDownsampling;
+        const float* b = blue[y * kDownsampling + ky] + x * kDownsampling;
+        const int max_kx = std::min(kDownsampling, width - x * kDownsampling);
+#pragma omp simd reduction(max : max_luminance)
+        for (int kx = 0; kx < max_kx; ++kx) {
+          max_luminance =
+              std::max(max_luminance, ComputeLuminance(r[kx], g[kx], b[kx]));
         }
       }
-      result[y][x] = std::log2(result[y][x]);
+      result[y][x] = std::log2(max_luminance);
     }
   }
 
@@ -182,6 +184,7 @@ OwnedImage Upsample(const Image<kReadOnly>& image) {
   const auto BoundX = [&image](int x) {
     return std::max(0, std::min(image.params.width - 1, x));
   };
+#pragma omp parallel for
   for (int y = 0; y < image.params.height; ++y) {
     const float* const in_row = image[y];
     float* const out_row = upsampled_horizontally[y];
@@ -198,6 +201,7 @@ OwnedImage Upsample(const Image<kReadOnly>& image) {
   const auto BoundY = [&image](int y) {
     return std::max(0, std::min(image.params.height - 1, y));
   };
+#pragma omp parallel for
   for (int y = 0; y < image.params.height; ++y) {
     const float* const in_rows[4] = {
         upsampled_horizontally[BoundY(y - 1)],
@@ -210,6 +214,7 @@ OwnedImage Upsample(const Image<kReadOnly>& image) {
         upsampled[2 * y + 1],
     };
 
+#pragma omp simd
     for (int x = 0; x < upsampled_horizontally.image.params.width; ++x) {
       out_rows[0][x] = in_rows[1][x];
       out_rows[1][x] = 0.5625f * (in_rows[1][x] + in_rows[2][x]) -
@@ -222,10 +227,15 @@ OwnedImage Upsample(const Image<kReadOnly>& image) {
 void ApplyToneMapping(Image<kReadWrite> r, Image<kReadWrite> g,
                       Image<kReadWrite> b,
                       const Image<kReadOnly>& blurred_luminances) {
+#pragma omp parallel for
   for (int y = 0; y < r.params.height; ++y) {
+    float* row_r = r[y];
+    float* row_g = g[y];
+    float* row_b = b[y];
+#pragma omp simd
     for (int x = 0; x < r.params.width; ++x) {
       const float log_local_max = blurred_luminances[y][x] + 1;
-      const float luminance = ComputeLuminance(r[y][x], g[y][x], b[y][x]);
+      const float luminance = ComputeLuminance(row_r[x], row_g[x], row_b[x]);
       const float log_luminance = std::min(log_local_max, std::log2(luminance));
       const float log_knee =
           kLogDefaultIntensityTarget *
@@ -244,13 +254,14 @@ void ApplyToneMapping(Image<kReadWrite> r, Image<kReadWrite> g,
       const float new_luminance = std::exp2(log_new_luminance);
       const float ratio = new_luminance / (luminance * kDefaultIntensityTarget);
 
-      r[y][x] *= ratio;
-      g[y][x] *= ratio;
-      b[y][x] *= ratio;
+      row_r[x] *= ratio;
+      row_g[x] *= ratio;
+      row_b[x] *= ratio;
     }
   }
 }
 
+#pragma omp declare simd linear(r, g, b)
 void Rec2020To709(float* const r, float* const g, float* const b) {
   const float new_r = 1.6605f * *r - 0.5876f * *g - 0.0728f * *b;
   const float new_g = -0.1246f * *r + 1.1329f * *g - 0.0084f * *b;
@@ -259,6 +270,8 @@ void Rec2020To709(float* const r, float* const g, float* const b) {
   *g = new_g;
 }
 
+#pragma omp declare simd linear(r, g, b) \
+    uniform(primaries_luminances, preserve_saturation)
 void GamutMap(float* r, float* g, float* b,
               const std::array<float, 3>& primaries_luminances,
               const float preserve_saturation = .4f) {
@@ -358,9 +371,12 @@ void FoteliToneMap(const FoteliParams* const params) {
                             .params = ImageParams(*params)};
 
   for (auto* plane : {&red, &green, &blue}) {
+#pragma omp parallel for
     for (int y = 0; y < plane->params.height; ++y) {
+      float* row = (*plane)[y];
+#pragma omp simd
       for (int x = 0; x < plane->params.width; ++x) {
-        (*plane)[y][x] = PQToLinear((*plane)[y][x]);
+        row[x] = PQToLinear(row[x]);
       }
     }
   }
@@ -379,7 +395,9 @@ void FoteliToneMap(const FoteliParams* const params) {
 
   static constexpr std::array<float, 3> kSRGBLuminances = {.2126f, .7152f,
                                                            .0722f};
+#pragma omp parallel for
   for (int y = 0; y < params->height; ++y) {
+#pragma omp simd
     for (int x = 0; x < params->width; ++x) {
       Rec2020To709(&red[y][x], &green[y][x], &blue[y][x]);
       GamutMap(&red[y][x], &green[y][x], &blue[y][x], kSRGBLuminances);
@@ -387,9 +405,12 @@ void FoteliToneMap(const FoteliParams* const params) {
   }
 
   for (auto* plane : {&red, &green, &blue}) {
+#pragma omp parallel for
     for (int y = 0; y < plane->params.height; ++y) {
+      float* row = (*plane)[y];
+#pragma omp simd
       for (int x = 0; x < plane->params.width; ++x) {
-        (*plane)[y][x] = LinearToSRGB((*plane)[y][x]);
+        row[x] = LinearToSRGB(row[x]);
       }
     }
   }

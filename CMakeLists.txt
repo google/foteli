@@ -22,11 +22,6 @@ project(Foteli
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
-find_package(PkgConfig)
-if (PKG_CONFIG_FOUND)
-  pkg_check_modules(OIIO IMPORTED_TARGET OpenImageIO)
-endif ()
-
 add_library(foteli foteli.h foteli.cc)
 set_target_properties(foteli
   PROPERTIES
@@ -39,6 +34,21 @@ generate_export_header(foteli)
 target_include_directories(foteli PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>"
   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/foteli>")
+
+find_package(OpenMP)
+if (OpenMP_CXX_FOUND)
+  target_link_libraries(foteli PRIVATE OpenMP::OpenMP_CXX)
+endif ()
+
+check_cxx_compiler_flag(-fno-math-errno COMPILER_HAS_NO_MATH_ERRNO)
+if (COMPILER_HAS_NO_MATH_ERRNO)
+  target_compile_options(foteli PRIVATE -fno-math-errno)
+endif ()
+
+find_package(PkgConfig)
+if (PKG_CONFIG_FOUND)
+  pkg_check_modules(OIIO IMPORTED_TARGET OpenImageIO)
+endif ()
 
 if (OIIO_FOUND)
   add_executable(foteli_main main.cc)
