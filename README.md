@@ -1,5 +1,7 @@
 # Foteli
 
+<p align="center"><img src="doc/foteli.svg" alt="Foteli" width="64"></p>
+
 This project aims at exploring and providing high-quality, perceptually
 plausible HDR tone mapping.
 
