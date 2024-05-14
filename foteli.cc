@@ -92,24 +92,39 @@ struct OwnedImage {
 
 #pragma omp declare simd
 float PQToLinear(const float pq) {
-  static constexpr float kPQM1 = 2610.f / 16384;
-  static constexpr float kPQM2 = 128 * 2523.f / 4096;
-  static constexpr float kPQC1 = 3424.f / 4096;
-  static constexpr float kPQC2 = 32 * 2413.f / 4096;
-  static constexpr float kPQC3 = 32 * 2392.f / 4096;
-
-  const float pq_pow_inv_m2 = std::pow(pq, 1.f / kPQM2);
-  return 10000.f * std::pow(std::max(0.f, pq_pow_inv_m2 - kPQC1) /
-                                (kPQC2 - kPQC3 * pq_pow_inv_m2),
-                            1.f / kPQM1);
+  const float x = pq * pq + pq;
+  static constexpr float kP[5] = {5500.34862f, 26455.3172f, 7386.02301f,
+                                  -62.3553089f, 2.62975656f};
+  static constexpr float kQ[5] = {2.67718770f, -33.9078883f, 174.364667f,
+                                  -428.736818f, 421.350107f};
+  float yp = kP[0];
+  float yq = kQ[0];
+  for (int i = 1; i < 5; ++i) {
+    yp = yp * x + kP[i];
+    yq = yq * x + kQ[i];
+  }
+  return yp / yq;
 }
 
 #pragma omp declare simd
 float LinearToSRGB(const float linear) {
+  static constexpr float kP[5] = {7.352629620e-01f, 1.474205315e+00f,
+                                  3.903842876e-01f, 5.287254571e-03f,
+                                  -5.135152395e-04f};
+  static constexpr float kQ[5] = {2.424867759e-02f, 9.258482155e-01f,
+                                  1.340816930e+00f, 3.036675394e-01f,
+                                  1.004519624e-02f};
   if (linear <= 0.04045f / 12.92f) {
     return 12.92f * linear;
   } else {
-    return 1.055f * std::pow(linear, 1.f / 2.4f) - 0.055f;
+    const float x = std::sqrt(linear);
+    float yp = kP[0];
+    float yq = kQ[0];
+    for (int i = 1; i < 5; ++i) {
+      yp = yp * x + kP[i];
+      yq = yq * x + kQ[i];
+    }
+    return yp / yq;
   }
 }
 
