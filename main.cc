@@ -96,14 +96,15 @@ int main(int argc, char** argv) {
             output->geterror().c_str());
     return EXIT_FAILURE;
   }
-  std::unique_ptr<float[]> row(new float[spec.width * spec.nchannels]);
+  std::unique_ptr<uint16_t[]> row(new uint16_t[spec.width * spec.nchannels]);
   for (int y = 0; y < spec.height; ++y) {
     for (int x = 0; x < spec.width; ++x) {
       for (int c = 0; c < spec.nchannels; ++c) {
-        row[x * spec.nchannels + c] = channels[c][y * spec.width + x];
+        row[x * spec.nchannels + c] = static_cast<uint16_t>(
+            .5f + 65535.f * channels[c][y * spec.width + x]);
       }
     }
-    if (!output->write_scanline(y, 0, OIIO::TypeDesc::FLOAT, row.get())) {
+    if (!output->write_scanline(y, 0, OIIO::TypeDesc::UINT16, row.get())) {
       fprintf(stderr, "Failed to write row %d: %s\n", y,
               output->geterror().c_str());
       return EXIT_FAILURE;
