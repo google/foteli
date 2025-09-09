@@ -43,14 +43,24 @@ int main(int argc, char** argv) {
   }
   std::vector<std::unique_ptr<float[]>> channels;
   for (int c = 0; c < spec.nchannels; ++c) {
-    std::unique_ptr<float[]> channel_data(new float[spec.width * spec.height]);
-    if (!input->read_image(/*subimage=*/0, /*miplevel=*/0, c, c + 1,
-                           OIIO::TypeDesc::FLOAT, channel_data.get())) {
-      fprintf(stderr, "Error reading \"%s\": %s\n", input_filename,
-              input->geterror().c_str());
-      return EXIT_FAILURE;
+    channels.emplace_back(new float[spec.width * spec.height]);
+  }
+
+  {
+    std::unique_ptr<uint16_t[]> row(new uint16_t[spec.width * spec.nchannels]);
+    for (int y = 0; y < spec.height; ++y) {
+      if (!input->read_scanline(y, 0, OIIO::TypeDesc::UINT16, row.get())) {
+        fprintf(stderr, "Error reading \"%s\": %s\n", input_filename,
+                input->geterror().c_str());
+        return EXIT_FAILURE;
+      }
+      for (int c = 0; c < spec.nchannels; ++c) {
+        for (int x = 0; x < spec.width; ++x) {
+          channels[c][y * spec.width + x] =
+              (1.f / 65535) * row[x * spec.nchannels + c];
+        }
+      }
     }
-    channels.push_back(std::move(channel_data));
   }
   input->close();
   const auto end_time_load = std::chrono::high_resolution_clock::now();
