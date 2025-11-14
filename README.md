@@ -38,9 +38,6 @@ $ foteli pq_input.png srgb_output.png
 
 In the future, we hope to improve this codebase in the following ways:
 
-- better performance (the current version is written in naïve C++ with few
-  optimizations);
-
 - support for other input and output colorspaces (at the very least, linear
   input, and wider output gamuts);
 

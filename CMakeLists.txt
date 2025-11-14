@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.10...3.31)
 
 project(Foteli
   LANGUAGES CXX
@@ -22,23 +22,28 @@ project(Foteli
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
+include(FetchContent)
+
+FetchContent_Declare(hwy
+  URL https://github.com/google/highway/releases/download/1.3.0/highway-1.3.0.tar.gz
+  URL_HASH SHA256=e8d696900b45f4123be8a9d6866f4e7b6831bf599f4b9c178964d968e6a58a69
+  EXCLUDE_FROM_ALL)
+FetchContent_MakeAvailable(hwy)
+
 add_library(foteli foteli.h foteli.cc)
 set_target_properties(foteli
   PROPERTIES
     IMPORTED_LINK_INTERFACE_LANGUAGES CXX
-    CXX_STANDARD 11
+    CXX_STANDARD 14
     CXX_STANDARD_REQUIRED YES)
+target_link_libraries(foteli PRIVATE hwy hwy_contrib)
+target_include_directories(foteli PRIVATE "${CMAKE_SOURCE_DIR}")
 
 include(GenerateExportHeader)
 generate_export_header(foteli)
 target_include_directories(foteli PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>"
   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/foteli>")
-
-find_package(OpenMP)
-if (OpenMP_CXX_FOUND)
-  target_link_libraries(foteli PRIVATE OpenMP::OpenMP_CXX)
-endif ()
 
 check_cxx_compiler_flag(-fno-math-errno COMPILER_HAS_NO_MATH_ERRNO)
 if (COMPILER_HAS_NO_MATH_ERRNO)
